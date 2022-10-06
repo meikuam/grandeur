@@ -1,0 +1,28 @@
+name: grandeur
+channels:
+  - pytorch
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.10
+  - future
+  - setuptools
+  - attrs
+  - typing
+  - typing-extensions
+  - numpy
+  - requests
+  - pandas
+  - sqlalchemy
+  - fastapi
+  - uvicorn
+  - jupyter
+  - scikit-image
+  - cudatoolkit
+  - pytorch
+  - torchvision
+  - torchaudio
+  - torchdata
+  - pip
+  - pip:
+    - tqdm
