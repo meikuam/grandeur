@@ -48,23 +48,23 @@ if __name__ == "__main__":
     ckpt_path = project_root()/"ckpt/squeezeformer"
 
     sample_rate=16000
-    n_mels=64
+    n_mels=80
     # data_path = pathlib.Path("/mnt/d") / "data/ruLibriSpeech/ruls_data"
-    data_path = project_root() / "data/ruLibriSpeech/ruls_data"
+    data_path = project_root() / "data/rulibrispeech"
     train_dataset = ruLibriSpeechDataset(data_path, "train", sample_rate=sample_rate)
     validation_dataset = ruLibriSpeechDataset(data_path, "test", sample_rate=sample_rate)
 
 
     encoder = TextEncoder(ru_alphabet)
-    collator = Collator(encoder, max_length=50000)
+    collator = Collator(encoder, max_length=100000)
 
 
-    batch_size = 2
+    batch_size = 24
 
     train_dataloader = DataLoader(
         train_dataset, batch_size=batch_size,
         shuffle=True, collate_fn=collator,
-        num_workers=0, pin_memory=False
+        num_workers=12, pin_memory=True
     )
 
     validation_dataloader = DataLoader(
@@ -88,15 +88,16 @@ if __name__ == "__main__":
     ).to(device)
     criterion = nn.CTCLoss(zero_infinity=True, reduction='mean').to(device)
 
-    optimizer = optim.AdamW(model.parameters(), lr=1e-3, betas=(0.9, 0.9995),  weight_decay=5e-6)
-
+    optimizer = optim.AdamW(model.parameters(), lr=1e-3, betas=(0.9, 0.9995),  weight_decay=5e-5)
+    #scheduler = optim.lr_scheduler.CyclicLR(optimizer, base_lr=1e-4, max_lr=1e-3)
     storage = defaultdict(list)
     start_epoch = 0
-    num_epoch = 10
-    save_step = 500
-    if os.path.exists(ckpt_path / "ckpt.pt"):
+    num_epoch = 20
+    save_step = 10000
+    load_path = ckpt_path / "ckpt_.pt"
+    if os.path.exists(load_path):
         try:
-            ckpt = load_model(ckpt_path / "ckpt.pt")
+            ckpt = load_model(load_path)
             print("epoch", ckpt['epoch'], "batch_index", ckpt['batch_index'])
             model.load_state_dict(ckpt['model'])
             optimizer.load_state_dict(ckpt['optimizer'])
@@ -113,10 +114,10 @@ if __name__ == "__main__":
         for i, batch in enumerate(pbar := tqdm(train_dataloader)):
             optimizer.zero_grad()
             # Move batch to device if device != 'cpu'
-            wav = batch['wav'].to(device)
-            length = batch['length'].to(device)
-            targets = batch['targets'].to(device)
-            target_lengths = batch['target_lengths'].to(device)
+            wav = batch['wav'].to(device, non_blocking=True)
+            length = batch['length'].to(device, non_blocking=True)
+            targets = batch['targets'].to(device, non_blocking=True)
+            target_lengths = batch['target_lengths'].to(device, non_blocking=True)
 
             mel, mel_length = featurizer(wav, length)
             mel = torch.swapaxes(mel, 1, 2).contiguous()
@@ -127,19 +128,10 @@ if __name__ == "__main__":
             outputs, output_lengths = model(mel, mel_length)
             
             loss = criterion(outputs.transpose(0, 1).contiguous(), targets, output_lengths, target_lengths)
-            try:
-                loss.backward()
-                optimizer.step()
-
-                l = loss.detach().cpu().numpy()
-            except Exception as e:
-                print("outputs", outputs.shape)
-                print("output_lengths", output_lengths.shape)
-                print("mel", mel.shape)
-                print("mel_length", mel_length.shape)
-                print("targets", targets.shape)
-                print("target_lengths", target_lengths.shape)
-                print(e)
+            loss.backward()
+            optimizer.step()
+            #scheduler.step()
+            l = loss.detach().cpu().numpy()
     #         print("max grad", max(p.grad.max() for p in list(model.parameters())))
     #         print("min grad", max(p.grad.min() for p in list(model.parameters())))
             pbar.set_description(f"loss: {l:.5}")
@@ -152,7 +144,6 @@ if __name__ == "__main__":
             
             # gc.collect()
             # torch.cuda.empty_cache()
-            # time.sleep(0.1)
         storage['train_loss'].append(train_loss_meter.avg)
 
         validation_loss_meter = AverageMeter()
@@ -181,13 +172,12 @@ if __name__ == "__main__":
             
             pbar.set_description(f"loss: {l:.5}, wer: {validation_wer_meter.val}")
             pbar.refresh()
-            # time.sleep(0.1)
 
         storage['validation_loss'].append(validation_loss_meter.avg)
         storage['validation_wer'].append(validation_wer_meter.avg)
 
         print(f"train_loss: {storage['train_loss']}, val_loss: {storage['validation_loss']}, val_wer: {storage['validation_wer']}")
-        if epoch % 2 == 0:
+        if epoch % 1 == 0:
             save_model(ckpt_path / f"ckpt_{epoch}.pt", model, optimizer, epoch, i)
         # fig, axes = plt.subplots(1, 3, figsize=(20, 5))
 

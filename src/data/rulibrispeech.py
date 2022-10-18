@@ -43,14 +43,15 @@ class ruLibriSpeechDataset(data.Dataset):
 
 class TextEncoder:
 
-    def __init__(self, alphabet):
+    def __init__(self, alphabet, blank=0):
         self.alphabet = alphabet
+        self.blank = blank
         
     def encode(self, text: str) -> List[int]:
         return list(map(lambda x: ru_alphabet[x], text))
     
     def decode(self, text: List[int]) -> str:
-        return "".join(list(map(lambda x: ru_alphabet.inverse[int(x)], text)))
+        return "".join(list(map(lambda x: ru_alphabet.inverse[int(x)], text))).replace(ru_alphabet.inverse[self.blank], "")
     
 
 class Collator:
@@ -58,7 +59,7 @@ class Collator:
     def __init__(self, encoder, max_length=45000):
         self.encoder = encoder
         self.max_length = max_length
-        self.min_length = 10000
+   #     self.min_length = 10000
         
     def __call__(self, batch):
         # we pad wavs to one length
@@ -69,7 +70,7 @@ class Collator:
         
         batch_wavs = torch.zeros(len(batch), min(max(lengths), self.max_length))
         for i, item in enumerate(batch):
-            batch_wavs[i, :max(min(lengths[i], self.max_length), self.min_length)] = item["audio"][..., :self.max_length]
+            batch_wavs[i, :min(lengths[i], self.max_length)] = item["audio"][..., :self.max_length]
         
         lengths = torch.tensor(lengths).long()
         
@@ -84,7 +85,7 @@ class Collator:
             targets.append(text)
             target_lengths.append(len(text))
         
-        lengths = torch.clamp(lengths, max=self.max_length, min=self.min_length)
+        lengths = torch.clamp(lengths, max=self.max_length)
 
         batch_targets = torch.zeros(len(batch), max(target_lengths)).long()
         
@@ -130,12 +131,13 @@ class Featurizer(nn.Module):
         
         self.featurizer = T.MelSpectrogram(
             sample_rate=sample_rate,
-            n_fft=512,
-            win_length=512,
+            n_fft=1024,
+            win_length=1024,
             hop_length=128,
             n_mels=n_mels,
             center=True,
-            onesided=True
+            onesided=True,
+            normalized=False
         )
         # self.normalizer = NormalizedSpectrogram(
         #     normalize="touniform"
